@@ -2,10 +2,12 @@ package com.chenyuan.pdftoolbox
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,9 +27,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -68,6 +74,19 @@ private fun wifiIpv4(context: Context): String? {
 }
 
 private fun randomKey(): String = UUID.randomUUID().toString().replace("-", "").substring(0, 6)
+
+private fun qrBitmap(content: String, sizePx: Int = 512): Bitmap {
+    val hints = mapOf(EncodeHintType.MARGIN to 2)
+    val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
+    val pixels = IntArray(sizePx * sizePx)
+    for (y in 0 until sizePx) {
+        val offset = y * sizePx
+        for (x in 0 until sizePx) {
+            pixels[offset + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+        }
+    }
+    return Bitmap.createBitmap(pixels, sizePx, sizePx, Bitmap.Config.ARGB_8888)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -204,6 +223,17 @@ fun TransferScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
+                    )
+                    val qr = remember(url) { qrBitmap(url) }
+                    Image(
+                        bitmap = qr.asImageBitmap(),
+                        contentDescription = "QR code for the transfer address",
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        "Scan with another phone's camera to open the transfer page. On a computer, type the address above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
                         "On the computer, open this address in a browser. Both devices must be on the same WiFi network.",

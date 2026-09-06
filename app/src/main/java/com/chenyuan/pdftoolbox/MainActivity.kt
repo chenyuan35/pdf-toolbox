@@ -2,6 +2,7 @@ package com.chenyuan.pdftoolbox
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -11,8 +12,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,9 +28,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,7 +62,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -238,6 +251,37 @@ fun SavedRow(uri: Uri, onDone: () -> Unit) {
     }
 }
 
+@Composable
+fun PageThumb(bitmap: Bitmap, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .border(
+                width = if (selected) 3.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clickable(onClick = onClick)
+    ) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = if (selected) "Page, selected" else "Page",
+            contentScale = ContentScale.FillWidth,
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (selected) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MergeScreen(onBack: () -> Unit) {
@@ -248,7 +292,10 @@ fun MergeScreen(onBack: () -> Unit) {
     var savedUri by remember { mutableStateOf<Uri?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) { files = uris; savedUri = null }
+        if (uris.isNotEmpty()) {
+            files = (files + uris).distinct()
+            savedUri = null
+        }
     }
     val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { out ->
         if (out != null) {
@@ -267,15 +314,38 @@ fun MergeScreen(onBack: () -> Unit) {
 
     ToolScaffold(title = "Merge PDFs", onBack = onBack) {
         Text(
-            "Select two or more PDF files. They will be merged in the order shown below.",
+            "Select two or more PDF files. They will be merged top to bottom — use the arrows to reorder.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         OutlinedButton(onClick = { picker.launch(arrayOf("application/pdf")) }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (files.isEmpty()) "Select PDF files" else "Change selection")
+            Text(if (files.isEmpty()) "Select PDF files" else "Add more PDF files")
         }
-        files.forEach { uri ->
-            Text("• ${PdfEngine.fileName(context, uri)}", style = MaterialTheme.typography.bodyMedium)
+        if (files.isNotEmpty()) {
+            OutlinedButton(onClick = {
+                files = emptyList()
+                savedUri = null
+            }, modifier = Modifier.fillMaxWidth()) {
+                Text("Clear list")
+            }
+        }
+        files.forEachIndexed { index, uri ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${index + 1}. ${PdfEngine.fileName(context, uri)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(enabled = index > 0, onClick = {
+                    files = files.toMutableList().apply { add(index - 1, removeAt(index)) }
+                }) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up") }
+                IconButton(enabled = index < files.lastIndex, onClick = {
+                    files = files.toMutableList().apply { add(index + 1, removeAt(index)) }
+                }) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down") }
+                IconButton(onClick = {
+                    files = files.filterIndexed { i, _ -> i != index }
+                }) { Icon(Icons.Filled.Close, contentDescription = "Remove") }
+            }
         }
         if (savedUri == null) {
             Button(
@@ -300,29 +370,43 @@ fun SplitScreen(onBack: () -> Unit) {
     var rangeError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var savedUri by remember { mutableStateOf<Uri?>(null) }
+    var thumbnails by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var selectedPages by remember { mutableStateOf(setOf<Int>()) }
+    var pendingPages by remember { mutableStateOf<List<Int>?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) { file = uri; pageCount = null; savedUri = null }
+        if (uri != null) {
+            file = uri; pageCount = null; savedUri = null
+            thumbnails = emptyList(); selectedPages = emptySet(); pendingPages = null
+        }
     }
     LaunchedEffect(file) {
         val src = file ?: return@LaunchedEffect
-        val n = withContext(Dispatchers.IO) {
-            runCatching { PdfEngine.pageCount(context, src) }.getOrNull()
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                PdfEngine.pageCount(context, src) to PdfEngine.renderPageThumbnails(context, src, maxPages = 30)
+            }
         }
-        pageCount = n
-        if (n == null) Toast.makeText(context, "Could not read this PDF", Toast.LENGTH_LONG).show()
+        result.fold(
+            onSuccess = { (n, thumbs) ->
+                pageCount = n
+                thumbnails = thumbs
+            },
+            onFailure = {
+                pageCount = null
+                Toast.makeText(context, "Could not read this PDF", Toast.LENGTH_LONG).show()
+            }
+        )
     }
     val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { out ->
         val src = file ?: return@rememberLauncherForActivityResult
-        if (out != null) {
+        val pages = pendingPages
+        if (out != null && pages != null) {
             runCatching { context.contentResolver.takePersistableUriPermission(out, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             busy = true
             scope.launch {
                 val ok = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val pages = PdfEngine.parsePageIndices(rangeText, pageCount!!)
-                        PdfEngine.extractPages(context, src, out, pages)
-                    }
+                    runCatching { PdfEngine.extractPages(context, src, out, pages) }
                 }
                 busy = false
                 ok.fold(
@@ -335,7 +419,7 @@ fun SplitScreen(onBack: () -> Unit) {
 
     ToolScaffold(title = "Extract pages", onBack = onBack) {
         Text(
-            "Pick a PDF, then enter the pages to keep, for example 1-3,5,8-10.",
+            "Pick a PDF, then tap the pages to keep, or type a range like 1-3,5,8-10.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -347,6 +431,39 @@ fun SplitScreen(onBack: () -> Unit) {
         }
         if (pageCount != null) {
             Text("This document has $pageCount pages.", style = MaterialTheme.typography.bodyMedium)
+            if (thumbnails.isNotEmpty()) {
+                Text(
+                    if (pageCount!! > thumbnails.size) {
+                        "Tap pages to keep them. Showing the first ${thumbnails.size} of $pageCount — type a range for the rest."
+                    } else {
+                        "Tap pages to keep them, or type a range below."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                thumbnails.chunked(3).forEachIndexed { rowIndex, row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEachIndexed { colIndex, bmp ->
+                            val pageIdx = rowIndex * 3 + colIndex
+                            PageThumb(
+                                bitmap = bmp,
+                                selected = pageIdx in selectedPages,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                selectedPages = if (pageIdx in selectedPages) selectedPages - pageIdx else selectedPages + pageIdx
+                            }
+                        }
+                    }
+                }
+                if (selectedPages.isNotEmpty()) {
+                    Text(
+                        "${selectedPages.size} page${if (selectedPages.size == 1) "" else "s"} selected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
             OutlinedTextField(
                 value = rangeText,
                 onValueChange = { rangeText = it; rangeError = null },
@@ -360,14 +477,15 @@ fun SplitScreen(onBack: () -> Unit) {
             Button(
                 onClick = {
                     try {
-                        PdfEngine.parsePageIndices(rangeText, pageCount!!)
+                        pendingPages = if (selectedPages.isNotEmpty()) selectedPages.sorted()
+                        else PdfEngine.parsePageIndices(rangeText, pageCount!!)
                         rangeError = null
                         saver.launch("extracted-pages.pdf")
                     } catch (e: Exception) {
                         rangeError = e.message ?: "Invalid input"
                     }
                 },
-                enabled = rangeText.isNotBlank() && !busy && savedUri == null,
+                enabled = (selectedPages.isNotEmpty() || rangeText.isNotBlank()) && !busy && savedUri == null,
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Extract & save") }
         }

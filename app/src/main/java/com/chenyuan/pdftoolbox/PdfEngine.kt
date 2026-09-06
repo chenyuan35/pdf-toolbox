@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
@@ -39,6 +40,30 @@ object PdfEngine {
     fun pageCount(context: Context, source: Uri): Int {
         context.contentResolver.openInputStream(source)!!.use { ins ->
             PDDocument.load(ins).use { doc -> return doc.numberOfPages }
+        }
+    }
+
+    /** Renders up to [maxPages] page thumbnails at the given width (white background). */
+    fun renderPageThumbnails(context: Context, source: Uri, maxPages: Int, widthPx: Int = 320): List<Bitmap> {
+        context.contentResolver.openFileDescriptor(source, "r")!!.use { pfd ->
+            val renderer = PdfRenderer(pfd)
+            try {
+                val count = minOf(renderer.pageCount, maxPages)
+                return (0 until count).map { index ->
+                    val page = renderer.openPage(index)
+                    try {
+                        val height = (widthPx * page.height.toFloat() / page.width).toInt().coerceAtLeast(1)
+                        val bmp = Bitmap.createBitmap(widthPx, height, Bitmap.Config.ARGB_8888)
+                        bmp.eraseColor(android.graphics.Color.WHITE)
+                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        bmp
+                    } finally {
+                        page.close()
+                    }
+                }
+            } finally {
+                renderer.close()
+            }
         }
     }
 

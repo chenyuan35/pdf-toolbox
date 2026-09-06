@@ -75,7 +75,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { Merge, Split, ImagesToPdf, Transfer }
+enum class Screen { Merge, Split, ImagesToPdf, Compress, Watermark, Protect, Transfer }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -89,6 +89,9 @@ class MainActivity : ComponentActivity() {
                         Screen.Merge -> MergeScreen(onBack = { screen = null })
                         Screen.Split -> SplitScreen(onBack = { screen = null })
                         Screen.ImagesToPdf -> ImagesToPdfScreen(onBack = { screen = null })
+                        Screen.Compress -> CompressScreen(onBack = { screen = null })
+                        Screen.Watermark -> WatermarkScreen(onBack = { screen = null })
+                        Screen.Protect -> ProtectScreen(onBack = { screen = null })
                         Screen.Transfer -> TransferScreen(onBack = { screen = null })
                     }
                 } ?: HomeScreen(onTool = { screen = it })
@@ -174,12 +177,24 @@ fun HomeScreen(onTool: (Screen) -> Unit) {
                 subtitle = "Turn photos and screenshots into a single PDF"
             ) { onTool(Screen.ImagesToPdf) }
             ToolCard(
+                title = "Compress PDF",
+                subtitle = "Shrink the file size for easier sharing"
+            ) { onTool(Screen.Compress) }
+            ToolCard(
+                title = "Watermark",
+                subtitle = "Stamp DRAFT or confidential text on every page"
+            ) { onTool(Screen.Watermark) }
+            ToolCard(
+                title = "Protect PDF",
+                subtitle = "Add a password so only you can open it"
+            ) { onTool(Screen.Protect) }
+            ToolCard(
                 title = "Transfer to PC",
                 subtitle = "Send and receive PDFs over WiFi — no cables, no cloud"
             ) { onTool(Screen.Transfer) }
             Spacer(Modifier.weight(1f))
             Text(
-                text = "v1.0 · 100% offline — your files never leave this device",
+                text = "No ads · No accounts · No cloud — files only go where you send them",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -230,7 +245,7 @@ fun sharePdf(context: Context, file: File) {
 }
 
 @Composable
-fun SavedRow(uri: Uri, onDone: () -> Unit) {
+fun SavedRow(uri: Uri, summary: String? = null, onDone: () -> Unit) {
     val context = LocalContext.current
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -238,6 +253,9 @@ fun SavedRow(uri: Uri, onDone: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text("✓ Saved", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            summary?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            }
             Text(
                 PdfEngine.fileName(context, uri),
                 style = MaterialTheme.typography.bodySmall,

@@ -10,3 +10,4 @@ tools/__pycache__/
 .kotlin/
 tools/.drive_token.json
 signing-key-backup.zip
+store/shots/
